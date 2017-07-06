@@ -12,6 +12,7 @@ Handle g_adtWeapon;
 Handle g_adtMapWpn;
 
 bool g_bHooked;
+bool g_bLastRequest;
 
 public Plugin myinfo =
 {
@@ -126,10 +127,14 @@ public Action Hook_GiveItemPre(int client, char classname[64], CEconItemView &It
 
 public void Hook_WeaponEquipPost(int client, int weapon)
 {
+    // If last request is available.
+    if(g_bLastRequest)
+        return;
+    
 	// Ignore map weapon
 	if(!IsMapWeapon(weapon))
 		return;
-	
+
 	int m_hPrevOwner = GetEntProp(weapon, Prop_Send, "m_hPrevOwner");
 	if(m_hPrevOwner > 0)
 		return;
@@ -143,7 +148,13 @@ public void Hook_WeaponEquipPost(int client, int weapon)
 public void CG_OnRoundStart()
 {
 	if(!g_bHooked) return;
-	CreateTimer(0.2, Timer_RoundStart)
+	CreateTimer(0.15, Timer_RoundStart);
+    g_bLastRequest = false;
+}
+
+public void OnAvailableLR(int Announced)
+{
+    g_bLastRequest = true;
 }
 
 public Action Timer_RoundStart(Handle timer)
