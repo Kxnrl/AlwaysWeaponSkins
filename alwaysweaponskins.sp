@@ -1,111 +1,122 @@
-#include <PTaH>
+public Plugin myinfo =
+{
+    name        = "AlwaysWeaponSkins (PTaH)",
+    author      = "Kyle",
+    description = "",
+    version     = "1.4",
+    url         = "https://kxnrl.com"
+};
+
 #include <sdkhooks>
 #include <sdktools>
 
+// https://github.com/komashchenko/PTaH
+#include <PTaH>
+
+#pragma semicolon 1
 #pragma newdecls required
 
 #define TEAM_CTs 3
 #define TEAM_TEs 2
 #define TEAM_ANY 1
 
-Handle g_adtWeapon;
-Handle g_adtMapWpn;
+static Handle g_adtWeapon;
+static Handle g_adtMapWpn;
+static bool g_bHook;
+static int  g_iMapWeapons[MAXPLAYERS+1];
 
-bool g_bHooked;
 
-int  g_iMapWeapons[MAXPLAYERS+1];
-
-public Plugin myinfo =
+public void OnConfigsExecuted()
 {
-    name        = "AlwaysWeaponSkins (PTaH)",
-    author      = "Kyle",
-    description = "",
-    version     = "1.3",
-    url         = "http://steamcommunity.com/id/_xQy_/"
-};
-
-public void OnAllPluginsLoaded()
-{
-    bool found = false;
+    bool m_bFind = false;
     
-    // Game ZombieEscape
-    if(FindPluginByFile("zombiereloaded.smx"))
-        found = true;
+    char map[32];
+    GetCurrentMap(map, 32);
+    
+    // Game Zombie
+    if(StrContains(map, "ze_", false) == 0 || StrContains(map, "zr_", false) == 0 || StrContains(map, "zm_", false) == 0)
+        m_bFind = true;
 
     // Game TTT
-    if(FindPluginByFile("ct.smx"))
-        found = true;
-    
+    if(StrContains(map, "ttt_", false) == 0)
+        m_bFind = true;
+
     // Game MiniGames
-    if(FindPluginByFile("mg_stats.smx"))
+    if(StrContains(map, "mg_", false) == 0)
     {
-        g_bHooked = true; // allow replace map weapon
-        found = true;
+        g_bHook = true; // allow replace map weapon
+        m_bFind = true;
+        LogMessage("allow replace map weapon");
+    }
+
+    // Game Jailbreak
+    if(StrContains(map, "jb_", false) == 0)
+    {
+        g_bHook = true; // allow replace map weapon
+        m_bFind = true;
     }
     
-    // Game Jailbreak
-    if(FindPluginByFile("sm_hosties.smx"))
-    {
-        g_bHooked = true; // allow replace map weapon
-        found = true;
-    }
+    // Game KreedZ / BHop / Surf
+    if(StrContains(map, "bkz_", false) == 0 || StrContains(map, "kz_", false) == 0 || StrContains(map, "xc_", false) == 0 || StrContains(map, "kzpro_", false) == 0 || StrContains(map, "bhop_", false) == 0 || StrContains(map, "surf_", false) == 0)
+        m_bFind = true;
 
     // Game Hunger game
-    if(FindPluginByFile("hg.smx"))
-        found = true;
+    if(StrContains(map, "hg_", false) == 0)
+        m_bFind = true;
     
     // Game Deathsourf
-    if(FindPluginByFile("deathsurf.smx"))
-        found = true;
+    if(StrContains(map, "dr_", false) == 0 || StrContains(map, "deathrun_", false) == 0)
+        m_bFind = true;
 
-    if(!found)
+    if(!m_bFind)
     {
-        LogError("alwaysweaponskins is not avaliable in current server.");
-        char m_szPath[128];
-        BuildPath(Path_SM, m_szPath, 128, "plugins/alwaysweaponskins.smx");
-        if(!FileExists(m_szPath) || !DeleteFile(m_szPath))
-            LogError("Delete alwaysweaponskins.smx failed.");
+        char m_szPath[2][128];
+        BuildPath(Path_SM, m_szPath[0], 128, "plugins/alwaysweaponskins.smx");
+        BuildPath(Path_SM, m_szPath[1], 128, "plugins/disabled/alwaysweaponskins.smx");
+        if(!RenameFile(m_szPath[1], m_szPath[0]))
+             LogError("Failed to move alwaysweaponskins.smx to disable folder.");
+        else LogError("alwaysweaponskins is not avaliable on current map.");
         ServerCommand("sm plugins unload alwaysweaponskins.smx");
         return;
     }
 
     InitWeapons();
+
     PTaH(PTaH_GiveNamedItemPre, Hook, Hook_GiveItemPre);
 
-    for(int client = 1; client <= MaxClients; ++client)
-        if(IsClientInGame(client))
-            OnClientPutInServer(client);
+    HookEventEx("player_spawn", Event_PlayerSpawn, EventHookMode_Post);
+    HookEventEx("round_start",  Event_RoundStart,  EventHookMode_Post);
 }
 
-public void CG_OnClientSpawn(int client)
+public void Event_PlayerSpawn(Event event, const char[] name, bool dontBroadcast)
 {
-    g_iMapWeapons[client] = 0;
+    g_iMapWeapons[GetClientOfUserId(event.GetInt("userid"))] = 0;
 }
 
 public void OnClientPutInServer(int client)
 {
-    if(!g_bHooked || IsFakeClient(client))
+    if(!g_bHook || IsFakeClient(client))
         return;
 
     g_iMapWeapons[client] = 0;
     SDKHook(client, SDKHook_WeaponEquipPost, Hook_WeaponEquipPost);
 }
-
+ 
 public void OnClientDisconnect(int client)
 {
-    if(!g_bHooked || IsFakeClient(client))
+    if(!g_bHook || IsFakeClient(client))
         return;
 
     SDKUnhook(client, SDKHook_WeaponEquipPost, Hook_WeaponEquipPost);
 }
 
-public Action Hook_GiveItemPre(int client, char classname[64], CEconItemView &Item) 
+public Action Hook_GiveItemPre(int client, char classname[64], CEconItemView &Item, bool &IgnoredCEconItemView)
 {
     // If client is not in-game or not alive, then stop.
-    if(!IsClientInGame(client) || !IsPlayerAlive(client) || IsFakeClient(client))
+    if(!IsClientInGame(client) || !IsPlayerAlive(client) || IsFakeClient(client) || IgnoredCEconItemView)
         return Plugin_Continue;
 
-    // Get weapon origin team, if not found, then stop.
+    // Get weapon origin team, if not m_bFind, then stop.
     int weaponTeam;
     if(!GetTrieValue(g_adtWeapon, classname, weaponTeam) || weaponTeam == TEAM_ANY)
         return Plugin_Continue;
@@ -142,12 +153,15 @@ public void Hook_WeaponEquipPost(int client, int weapon)
     int m_hPrevOwner = GetEntProp(weapon, Prop_Send, "m_hPrevOwner");
     if(m_hPrevOwner > 0)
         return;
+    
+    // Ignore maps item
+    if(GetEntPropEnt(weapon, Prop_Data, "m_hMoveChild") == -1)
+        return;
 
     // Slay Player if too many pick-up
     if(++g_iMapWeapons[client] > 6)
     {
         ForcePlayerSuicide(client);
-        PrintToChatAll("[\x04AWS\x01]  \x07%N\x05因为刷枪被猫灵强*致死", client);
         return;
     }
 
@@ -158,9 +172,11 @@ public void Hook_WeaponEquipPost(int client, int weapon)
     GivePlayerItem(client, classname);
 }
 
-public void CG_OnRoundStart()
+public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 {
-    if(!g_bHooked) return;
+    if(!g_bHook)
+        return;
+
     CreateTimer(0.1, Timer_RoundStart);
 }
 
@@ -192,15 +208,17 @@ public Action Timer_RoundStart(Handle timer)
 
         PushArrayCell(g_adtMapWpn, entity);
     }
+    
+    return Plugin_Stop;
 }
 
 public void OnEntityDestroyed(int entity)
 {
-    if(!g_bHooked) return;
+    if(!g_bHook) return;
     IsMapWeapon(entity);
 }
 
-bool IsMapWeapon(int entity)
+static bool IsMapWeapon(int entity)
 {
     int index = FindValueInArray(g_adtMapWpn, entity);
     
@@ -211,7 +229,7 @@ bool IsMapWeapon(int entity)
     return true;
 }
 
-void GetWeaponClassname(int weapon, char[] classname, int maxLen)
+static void GetWeaponClassname(int weapon, char[] classname, int maxLen)
 {
     GetEdictClassname(weapon, classname, maxLen);
     switch(GetEntProp(weapon, Prop_Send, "m_iItemDefinitionIndex"))
@@ -223,7 +241,7 @@ void GetWeaponClassname(int weapon, char[] classname, int maxLen)
     }
 }
 
-void InitWeapons()
+static void InitWeapons()
 {
     g_adtWeapon = CreateTrie();
     g_adtMapWpn = CreateArray();
